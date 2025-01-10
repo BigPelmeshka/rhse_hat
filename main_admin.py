@@ -379,7 +379,7 @@ async def ask_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         context.user_data["effective_script"] = (
             text_to_send
-            + f"\n\nРаспределение участников состоится автоматически <b>в {(datetime.now() + timedelta(hours = 3 + HOURS)).strftime("%d.%m.%Y, %H:%M:%S")}</b>"
+            + f"\n\nРаспределение участников состоится автоматически <b>в {(datetime.now() + timedelta(hours = 3 + HOURS)).strftime('%d.%m.%Y, %H:%M:%S')}</b>"
         )
         context.user_data["user_data"] = user_data
         context.chat_data["subscribe"] = True
