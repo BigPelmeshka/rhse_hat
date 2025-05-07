@@ -129,7 +129,7 @@ async def get_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
             len(value) > 4
             and username in value[1]
             and value[2] == choice
-            and value[4] == 1
+            and value[4] == "1"
         ):
             text = f"К сожалению, мы уже оценили этот этап. Сосредоточься на других заданиях!"
             await context.bot.send_message(chat_id=user_id, text=text)
@@ -137,9 +137,7 @@ async def get_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = f"Пришли ссылку на облачное хранилище с ответом на задание №{choice}"
 
-    await context.bot.send_message(
-        chat_id=user_id, text=text, reply_markup=ReplyKeyboardRemove
-    )
+    await context.bot.send_message(chat_id=user_id, text=text)
 
     return FINISH
 
@@ -184,7 +182,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
     await bot.send_message(
         text=("До свидания 🫶\n" "Нажмите на /start, чтобы начать"),
-        chat_id=update.effective_chat.id,
+        chat_id=context.user_data["user_id"],
         reply_markup=ReplyKeyboardRemove(),
     )
 
@@ -253,7 +251,7 @@ def main() -> None:
         )
     )
     application.add_handler(CommandHandler("skip", cancel))
-    application.add_handler(CallbackQueryHandler(im_in, pattern="im_in_(.*)"))
+    # application.add_handler(CallbackQueryHandler(im_in, pattern="im_in_(.*)"))
 
     application.add_error_handler(error_handler, block=False)
 
