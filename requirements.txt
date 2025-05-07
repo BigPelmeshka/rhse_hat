@@ -49,3 +49,10 @@ typing_extensions==4.12.2
 tzlocal==5.2
 urllib3==2.3.0
 wcwidth==0.2.13
+google-api-core==2.24.1
+google-api-python-client==2.132.0
+google-auth==2.38.0
+google-auth-httplib2==0.2.0
+googleapis-common-protos==1.68.0
+pandas==2.2.2
+numpy==1.26.4

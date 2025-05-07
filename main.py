@@ -4,15 +4,25 @@ import os
 from datetime import datetime, timedelta
 
 import pytz
+import pandas as pd
+from src.gsheets import GoogleSheets
 from telegram import ReplyKeyboardRemove, Update
 from telegram.constants import ParseMode
 from telegram.error import Forbidden
+from telegram import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    ReplyKeyboardRemove,
+    Update,
+)
 from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
     ContextTypes,
     ConversationHandler,
+    MessageHandler,
+    filters,
 )
 
 from config import BOT_TOKEN_HAT as TOKEN
@@ -22,7 +32,7 @@ HQ_ID = 151466050
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-IM_IN, TEST = range(2)
+GET_URL, FINISH = range(2)
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -39,15 +49,26 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         )
         return ConversationHandler.END
 
+    GS = GoogleSheets()
+    authenticated_users = GS.get_authenticated_users()
+
+    if str(update.message.from_user.username) not in [
+        user[0] for user in authenticated_users
+    ]:
+        await update.message.reply_text(
+            "Вы не авторизованы для использования бота. Обратитесь к своему менеджеру, чтобы вас внесли в список"
+        )
+        return ConversationHandler.END
+
     user = {
         "user_id": user_id,
         "username": update.effective_user.username,
         "first_name": update.effective_user.first_name,
         "last_name": update.effective_user.last_name,
-        "created_at": datetime.now(pytz.timezone("Europe/Moscow")).strftime(
-            "%d.%m.%Y %H:%M:%S"
-        ),
     }
+
+    context.user_data["user"] = user
+    context.user_data["user_id"] = user_id
 
     with open(f"{os.getcwd()}/users/users.json", "r", encoding="utf-8") as file:
         user_data = json.load(file)
@@ -57,46 +78,104 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         with open(f"{os.getcwd()}/users/users.json", "w", encoding="utf-8") as file:
             json.dump(user_data, file, indent=4, ensure_ascii=False)
 
-        add_text = "Ты успешно зарегистрирован/а в системе, жди сообщения о наборе желающих на мастер-класс!"
-    else:
-        add_text = "Ты уже в системе, жди сообщения о наборе желающих на мастер-класс!"
+    reply_keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    text="🌥️ 1 задание",
+                    callback_data=1,
+                ),
+                InlineKeyboardButton(
+                    text="👻 2 задание",
+                    callback_data=2,
+                ),
+            ],
+            [
+                InlineKeyboardButton(
+                    text="⭐️ 3 задание",
+                    callback_data=3,
+                ),
+            ],
+        ]
+    )
+
+    add_text = "Выбери этап домашнего задания, которое ты хочешь сдать: "
 
     await update.message.reply_text(
         text=(
-            f"Привет, {update.effective_user.first_name} {update.effective_user.last_name}! Это распределяющая шляпа для Мастер-Классов РХСЕ"
+            f"Привет, {update.effective_user.first_name} {update.effective_user.last_name}! Это бот для конкурса Мистер и Мисс РХСЕ 2025"
             "\n"
             f"{add_text}"
         ),
         parse_mode="HTML",
+        reply_markup=reply_keyboard,
     )
 
+    return GET_URL
 
-async def im_in(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    chat_id = update.callback_query.from_user.id
-    job_id = update.callback_query.data.replace("im_in_", "")
+async def get_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    with open(
-        f"{os.getcwd()}/jobs/{job_id}/alarm.json",
-        "r",
-        encoding="utf-8",
-    ) as file:
-        alarm = json.load(file)
+    user_id = context.user_data["user_id"]
+    username = context.user_data["user"]["username"]
+    choice = update.callback_query.data
+    context.user_data["choice"] = choice
 
-    subscription = {"user": chat_id, "date": int(datetime.now().timestamp())}
+    GS = GoogleSheets()
+    results = GS.get_results()
 
-    if chat_id not in alarm["subscribed_users"]:
-        alarm["subscribed_users"].append(chat_id)
-        alarm["subscriptions"].append(subscription)
+    for value in results:
+        if (
+            len(value) > 4
+            and username in value[1]
+            and value[2] == choice
+            and value[4] == 1
+        ):
+            text = f"К сожалению, мы уже оценили этот этап. Сосредоточься на других заданиях!"
+            await context.bot.send_message(chat_id=user_id, text=text)
+            return await cancel(update=update, context=context)
 
-        with open(
-            f"{os.getcwd()}/jobs/{job_id}/alarm.json",
-            "w",
-            encoding="utf-8",
-        ) as file:
-            json.dump(alarm, file, indent=4, ensure_ascii=False)
+    text = f"Пришли ссылку на облачное хранилище с ответом на задание №{choice}"
 
-    await context.bot.send_message(chat_id=chat_id, text=f"Отлично! Жди распределения!")
+    await context.bot.send_message(
+        chat_id=user_id, text=text, reply_markup=ReplyKeyboardRemove
+    )
+
+    return FINISH
+
+
+async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    user_id = context.user_data["user_id"]
+    context.user_data["result"] = update.message.text
+
+    await update_google_history(context=context)
+
+    text = f"Спасибо, задание принято!"
+
+    await context.bot.send_message(chat_id=user_id, text=text)
+
+    return await cancel(update=update, context=context)
+
+
+async def update_google_history(context: ContextTypes.DEFAULT_TYPE):
+    logger.warning("Updating Google History")
+    data = {
+        "Дата": datetime.now(tz=pytz.timezone("Europe/Moscow")).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
+        "Участник": context.user_data["user"]["username"],
+        "Задание": context.user_data["choice"],
+        "Ответ": context.user_data["result"],
+    }
+
+    google_df = pd.DataFrame([data])
+
+    GS = GoogleSheets()
+    GS.df_to_spreadsheets(google_df=google_df)
+
+    logger.warning("Google History was updated")
+    return True
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -151,8 +230,11 @@ def main() -> None:
             CommandHandler("start", start),
         ],
         states={
-            IM_IN: [
-                CallbackQueryHandler(im_in, pattern="im_in_(.*)"),
+            GET_URL: [
+                CallbackQueryHandler(get_url, block=False),
+            ],
+            FINISH: [
+                MessageHandler(filters.ALL, finish, block=False),
             ],
         },
         fallbacks=[

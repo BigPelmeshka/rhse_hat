@@ -175,3 +175,6 @@ users/
 jobs/
 
 *.ipynb
+
+*cursor*
+*__pycache__*
